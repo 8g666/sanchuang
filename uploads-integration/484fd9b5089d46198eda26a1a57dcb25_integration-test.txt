@@ -1,0 +1,1 @@
+﻿DocGuard 使用 Qdrant 存储向量，使用 Redis 和 Celery 执行可靠的异步任务。

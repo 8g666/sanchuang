@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Test and lint cache
+.pytest_cache/
+.pytest-cache/
+.pytest-tmp*/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime data
+data/
+uploads/
+logs/
+
+# Operating system
+.DS_Store
