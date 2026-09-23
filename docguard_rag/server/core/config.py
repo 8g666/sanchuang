@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./docguard.db"
     upload_dir: str = "uploads"
     max_upload_size: int = 20 * 1024 * 1024
-    allowed_file_types: str = "txt,md,markdown,html,htm,docx,pdf,png,jpg,jpeg,tif,tiff,bmp,webp"
+    allowed_file_types: str = (
+        "txt,md,markdown,html,htm,docx,pptx,pdf,png,jpg,jpeg,tif,tiff,bmp,webp"
+    )
     ocr_lang: str = "chi_sim+eng"
     ocr_config: str = ""
     ocr_tesseract_cmd: str | None = None
