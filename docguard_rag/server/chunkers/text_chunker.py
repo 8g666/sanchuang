@@ -7,7 +7,6 @@ from docguard_rag.server.models.document_chunk import DocumentChunk
 
 class TextChunker(Chunker):
     def __init__(self, chunk_size: int = 500, overlap: int = 100):
-
         self.chunk_size = chunk_size
         self.overlap = overlap
 
@@ -17,7 +16,6 @@ class TextChunker(Chunker):
             raise ValueError("overlap must be between zero and chunk_size - 1")
 
     def split(self, block: DocumentBlock) -> list[DocumentChunk]:
-
         text = block.text
 
         chunks = []
