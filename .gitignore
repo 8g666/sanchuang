@@ -31,5 +31,12 @@ data/
 uploads/
 logs/
 
+# SQLite databases (runtime artifacts, regenerated on boot by init_database)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite3
+
 # Operating system
 .DS_Store
