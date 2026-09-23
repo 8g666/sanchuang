@@ -26,6 +26,29 @@ class DocumentDeleteResult(BaseModel):
     status: str = "DELETED"
 
 
+class ReembedResult(BaseModel):
+    reembedded: int = 0
+    embedded_without_offsets: int = 0
+    document_ids_needing_reindex: list[str] = Field(default_factory=list)
+    batches: int = 0
+    dimension: int = 0
+    job_id: str | None = None
+    status: str = "COMPLETED"
+
+
+class CustomerServiceResponse(BaseModel):
+    session_id: str
+    message: str
+    intent: str
+    intent_confidence: float
+    status: str
+    handoff_required: bool = False
+    suggested_actions: list[str] = Field(default_factory=list)
+    sources: list["Source"] = Field(default_factory=list)
+    query_status: str | None = None
+    query_verified: bool | None = None
+
+
 class Source(BaseModel):
     chunk_id: str
     document_id: str

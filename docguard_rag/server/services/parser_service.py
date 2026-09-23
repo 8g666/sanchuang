@@ -2,6 +2,7 @@ from docguard_rag.server.models.document_block import DocumentBlock
 from docguard_rag.server.parsers.base import DocumentParser
 from docguard_rag.server.parsers.docx_parser import DOCXParser
 from docguard_rag.server.parsers.html_parser import HTMLDocumentParser
+from docguard_rag.server.parsers.image_parser import ImageOCRParser
 from docguard_rag.server.parsers.markdown_parser import MarkdownParser
 from docguard_rag.server.parsers.pdf_parser import PDFParser
 from docguard_rag.server.parsers.txt_parser import TXTParser
@@ -15,6 +16,7 @@ class ParserService:
             HTMLDocumentParser(),
             DOCXParser(),
             PDFParser(),
+            ImageOCRParser(),
         ]
 
     def parse(

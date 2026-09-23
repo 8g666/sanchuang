@@ -5,6 +5,7 @@ from docguard_rag.types import (
     CorrectionIssue,
     CorrectionLocation,
     CorrectionResult,
+    CustomerServiceResponse,
     DocumentDeleteResult,
     DocumentResult,
     DocumentStatus,
@@ -14,6 +15,7 @@ from docguard_rag.types import (
     JobStatus,
     QueryAttempt,
     QueryResult,
+    ReembedResult,
     ReviewResult,
     Source,
 )
@@ -28,6 +30,7 @@ __all__ = [
     "DocumentResult",
     "DocumentDeleteResult",
     "DocumentStatus",
+    "ReembedResult",
     "Issue",
     "IssueLocation",
     "IssuePage",
@@ -39,4 +42,5 @@ __all__ = [
     "CorrectionIssue",
     "CorrectionLocation",
     "CorrectionResult",
+    "CustomerServiceResponse",
 ]

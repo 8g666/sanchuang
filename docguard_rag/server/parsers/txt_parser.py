@@ -7,11 +7,9 @@ from docguard_rag.server.parsers.utils import decode_text_file, new_block_id, se
 
 class TXTParser(DocumentParser):
     def supports(self, file_type: str) -> bool:
-
         return file_type.lower() in ["txt"]
 
     def parse(self, file_path: str, document_id: str) -> list[DocumentBlock]:
-
         blocks: list[DocumentBlock] = []
         content = decode_text_file(file_path)
 

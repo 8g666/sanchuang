@@ -1,8 +1,21 @@
 from fastapi.testclient import TestClient
 
+from docguard_rag.server.core.config import Settings
+from docguard_rag.server.database import connection
 from docguard_rag.server.main import app
 
 client = TestClient(app)
+
+
+def test_pytest_binds_an_isolated_database() -> None:
+    """Tripwire: connection.py builds its engine at import time from the environment.
+
+    tests/conftest.py points DOCGUARD_DATABASE_URL at a throwaway file before collection.
+    If this fails, the suite is writing to the git-tracked ./docguard.db.
+    """
+
+    assert connection.database_url != Settings.model_fields["database_url"].default
+    assert "docguard.db" not in connection.database_url
 
 
 def test_health_check() -> None:

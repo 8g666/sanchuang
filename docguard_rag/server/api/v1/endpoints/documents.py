@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from docguard_rag.server.core.config import get_settings
 from docguard_rag.server.core.security import Principal, get_principal
 from docguard_rag.server.database.connection import SessionLocal, get_db
 from docguard_rag.server.repositories.chunk_repository import ChunkRepository
@@ -19,9 +20,12 @@ from docguard_rag.server.schemas.document import (
     DocumentDeleteResult,
     DocumentStatus,
     DocumentUploadResult,
+    ReembedRequest,
+    ReembedResult,
 )
 from docguard_rag.server.services.document_lifecycle_service import DocumentLifecycleService
 from docguard_rag.server.services.ingestion_service import IngestionError, IngestionService
+from docguard_rag.server.services.reembed_service import ReembedService
 from docguard_rag.server.services.task_dispatcher import dispatcher
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,7 @@ chunk_repository = ChunkRepository()
 job_repository = JobRepository()
 ingestion_service = IngestionService()
 lifecycle_service = DocumentLifecycleService(ingestion_service)
+reembed_service = ReembedService()
 
 
 def _parse_metadata(value: str | None) -> dict | None:
@@ -120,6 +125,50 @@ def _run_ingestion_job(job_id: str, arguments: dict) -> dict:
             raise
 
 
+def _run_reembed_job(job_id: str, arguments: dict) -> dict:
+    with SessionLocal() as db:
+        job = job_repository.get(db, job_id)
+        if job is not None and job.status == "COMPLETED":
+            return json.loads(job.result_json or "{}")
+        job_repository.update(
+            db, job_id, status="PROCESSING", progress=0, current_stage="REEMBEDDING"
+        )
+
+        def report(done: int, total: int) -> None:
+            job_repository.update(
+                db,
+                job_id,
+                status="PROCESSING",
+                progress=int(done * 100 / total) if total else 100,
+                current_stage="REEMBEDDING",
+            )
+
+        try:
+            result = reembed_service.reembed(db, progress=report, **arguments)
+            result_data = result.model_dump(mode="json")
+            job_repository.update(
+                db,
+                job_id,
+                status="COMPLETED",
+                progress=100,
+                current_stage="COMPLETED",
+                result=result_data,
+            )
+            return result_data
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Corpus re-embed job %s failed", job_id)
+            job_repository.update(
+                db,
+                job_id,
+                status="FAILED",
+                progress=100,
+                current_stage="FAILED",
+                error=str(exc),
+            )
+            raise
+
+
 @router.post(
     "",
     response_model=ApiResponse[DocumentUploadResult],
@@ -190,6 +239,63 @@ async def upload_document(
             result = ingestion_service.ingest_bytes(db, **arguments)
         except IngestionError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return ApiResponse(request_id=request.state.request_id, data=result)
+
+
+@router.post(
+    "/reembed",
+    response_model=ApiResponse[ReembedResult],
+    summary="Re-embed the corpus with the configured model",
+)
+def reembed_corpus(
+    payload: ReembedRequest,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(get_db),
+) -> ApiResponse[ReembedResult]:
+    # Registered above every /{document_id} route so "reembed" is never read as an id.
+    if payload.document_ids:
+        accessible = document_repository.get_documents(
+            db, payload.document_ids, tenant_id=principal.tenant_id
+        )
+        if len(accessible) != len(set(payload.document_ids)):
+            raise HTTPException(status_code=404, detail="One or more documents were not found")
+
+    arguments = {
+        "tenant_id": principal.tenant_id,
+        "document_ids": payload.document_ids or None,
+        "batch_size": payload.batch_size,
+    }
+
+    if payload.async_mode:
+        job_id = f"job_{uuid4().hex[:12]}"
+        job_repository.create(
+            db,
+            job_id=job_id,
+            tenant_id=principal.tenant_id,
+            job_type="CORPUS_REEMBED",
+            payload={"document_ids": payload.document_ids},
+        )
+        try:
+            dispatcher.submit(_run_reembed_job, job_id, arguments)
+        except Exception as exc:
+            job_repository.update(
+                db,
+                job_id,
+                status="FAILED",
+                progress=100,
+                current_stage="DISPATCH_FAILED",
+                error=str(exc),
+            )
+            raise HTTPException(status_code=503, detail="Task queue unavailable") from exc
+        result = ReembedResult(
+            job_id=job_id,
+            status="PROCESSING",
+            dimension=get_settings().embedding_dimension,
+        )
+    else:
+        result = reembed_service.reembed(db, **arguments)
 
     return ApiResponse(request_id=request.state.request_id, data=result)
 

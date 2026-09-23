@@ -81,7 +81,7 @@ class DocumentLifecycleService:
             raise
 
         try:
-            self.vectors.store.delete(old_chunk_ids)
+            self.vectors.forget(old_chunk_ids)
         except Exception:
             logger.exception("Old vectors for replacement %s could not be removed", document_id)
         self._delete_file(old_path)

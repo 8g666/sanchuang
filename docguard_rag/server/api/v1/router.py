@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from docguard_rag.server.api.v1.endpoints import (
     corrections,
+    customer_service,
     documents,
     jobs,
     query,
@@ -16,3 +17,4 @@ api_router.include_router(query.router)
 api_router.include_router(reviews.router)
 api_router.include_router(jobs.router)
 api_router.include_router(corrections.router)
+api_router.include_router(customer_service.router)

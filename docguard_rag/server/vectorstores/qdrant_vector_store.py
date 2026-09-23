@@ -144,7 +144,7 @@ class QdrantVectorStore(VectorStore):
             if value is None:
                 continue
             match = (
-                {"any": list(value)} if isinstance(value, (list, tuple, set)) else {"value": value}
+                {"any": list(value)} if isinstance(value, list | tuple | set) else {"value": value}
             )
             conditions.append({"key": key, "match": match})
         return {"must": conditions} if conditions else None

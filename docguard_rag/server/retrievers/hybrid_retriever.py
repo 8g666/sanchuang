@@ -1,6 +1,7 @@
 from docguard_rag.server.core.provider_factory import create_reranker
+from docguard_rag.server.core.tokenizer import tokenize
 from docguard_rag.server.retrievers.base import Retriever
-from docguard_rag.server.retrievers.lexical_retriever import LexicalRetriever, tokenize
+from docguard_rag.server.retrievers.lexical_retriever import LexicalRetriever
 from docguard_rag.server.retrievers.vector_retriever import VectorRetriever
 
 

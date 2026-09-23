@@ -15,11 +15,16 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./docguard.db"
     upload_dir: str = "uploads"
     max_upload_size: int = 20 * 1024 * 1024
-    allowed_file_types: str = "txt,md,markdown,html,htm,docx,pdf"
+    allowed_file_types: str = "txt,md,markdown,html,htm,docx,pdf,png,jpg,jpeg,tif,tiff,bmp,webp"
+    ocr_lang: str = "chi_sim+eng"
+    ocr_config: str = ""
+    ocr_tesseract_cmd: str | None = None
 
     chunk_size: int = 500
     chunk_overlap: int = 100
     embedding_dimension: int = 128
+    embedding_batch_size: int = 64
+    embedding_query_cache_size: int = 1024
 
     vector_store_provider: str = "local"
     qdrant_url: str = "http://127.0.0.1:6333"
@@ -64,6 +69,7 @@ class Settings(BaseSettings):
     auth_enabled: bool = False
     api_keys_json: str = "{}"
     default_tenant_id: str = "default"
+    support_history_limit: int = 20
     task_workers: int = 2
     task_backend: str = "local"
     celery_broker_url: str = "redis://127.0.0.1:6379/0"

@@ -19,13 +19,16 @@ from docguard_rag.server.retrievers.hybrid_retriever import HybridRetriever
 from docguard_rag.server.retrievers.lexical_retriever import LexicalRetriever
 from docguard_rag.server.retrievers.vector_retriever import VectorRetriever
 from docguard_rag.server.schemas.correction import CorrectionRequest
+from docguard_rag.server.schemas.customer_service import CustomerServiceRequest
 from docguard_rag.server.schemas.query import QueryRequest
 from docguard_rag.server.schemas.review import ReviewRequest
 from docguard_rag.server.services.correction_service import CorrectionService
+from docguard_rag.server.services.customer_service import CustomerServiceService
 from docguard_rag.server.services.document_lifecycle_service import DocumentLifecycleService
 from docguard_rag.server.services.index_service import IndexService
 from docguard_rag.server.services.ingestion_service import IngestionError, IngestionService
 from docguard_rag.server.services.query_service import QueryService
+from docguard_rag.server.services.reembed_service import ReembedService
 from docguard_rag.server.services.retrieval_service import RetrievalService
 from docguard_rag.server.services.review_service import ReviewService
 from docguard_rag.server.services.task_dispatcher import InProcessTaskDispatcher
@@ -33,6 +36,7 @@ from docguard_rag.server.services.vector_service import VectorService
 from docguard_rag.server.storage.file_storage import FileStorage
 from docguard_rag.types import (
     CorrectionResult,
+    CustomerServiceResponse,
     DocumentDeleteResult,
     DocumentResult,
     DocumentStatus,
@@ -40,6 +44,7 @@ from docguard_rag.types import (
     IssuePage,
     JobStatus,
     QueryResult,
+    ReembedResult,
     ReviewResult,
 )
 
@@ -116,6 +121,28 @@ class LocalDocuments:
                 sentence_count=sum(block.block_type == "sentence" for block in blocks),
             )
 
+    def upload_many(
+        self,
+        file_paths: list[str | Path],
+        *,
+        collection_id: str | None = None,
+        enable_review: bool = False,
+        metadata: dict | None = None,
+        async_mode: bool = False,
+    ) -> list[DocumentResult]:
+        """Build a knowledge base from a mixed list of supported data sources."""
+
+        return [
+            self.upload(
+                path,
+                collection_id=collection_id,
+                enable_review=enable_review,
+                metadata=metadata,
+                async_mode=async_mode,
+            )
+            for path in file_paths
+        ]
+
     def update(
         self,
         document_id: str,
@@ -157,6 +184,36 @@ class LocalDocuments:
             except IngestionError as exc:
                 raise DocGuardError(str(exc)) from exc
         return DocumentResult.model_validate(result.model_dump())
+
+    def reembed(
+        self,
+        *,
+        document_ids: list[str] | None = None,
+        batch_size: int | None = None,
+        async_mode: bool = False,
+    ) -> ReembedResult:
+        """Re-embed committed chunks with the currently configured model."""
+
+        arguments = {
+            "tenant_id": self._guard.tenant_id,
+            "document_ids": document_ids,
+            "batch_size": batch_size,
+        }
+        if async_mode:
+            job_id = f"job_{uuid4().hex[:12]}"
+            with self._guard._session() as db:
+                self._guard._job_repository.create(
+                    db,
+                    job_id=job_id,
+                    tenant_id=self._guard.tenant_id,
+                    job_type="CORPUS_REEMBED",
+                    payload={"document_ids": document_ids or []},
+                )
+            self._guard._dispatcher.submit(self._guard._run_reembed_job, job_id, arguments)
+            return ReembedResult(job_id=job_id, status="PROCESSING")
+        with self._guard._session() as db:
+            result = self._guard._reembed.reembed(db, **arguments)
+        return ReembedResult.model_validate(result.model_dump())
 
     def delete(self, document_id: str) -> DocumentDeleteResult:
         with self._guard._session() as db:
@@ -385,6 +442,50 @@ class LocalJobs:
             )
 
 
+class LocalCustomerService:
+    def __init__(self, guard: "DocGuard"):
+        self._guard = guard
+
+    def chat(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        document_ids: list[str] | None = None,
+        collection_id: str | None = None,
+        top_k: int = 5,
+        corrective: bool | None = None,
+        max_retries: int | None = None,
+        handoff_if_unresolved: bool = True,
+    ) -> CustomerServiceResponse:
+        payload = CustomerServiceRequest(
+            message=message,
+            session_id=session_id,
+            document_ids=document_ids or [],
+            collection_id=collection_id,
+            top_k=top_k,
+            corrective=corrective,
+            max_retries=max_retries,
+            handoff_if_unresolved=handoff_if_unresolved,
+        )
+        with self._guard._session() as db:
+            result = self._guard._customer_service.chat(
+                db,
+                payload,
+                tenant_id=self._guard.tenant_id,
+                request_id=f"local_{uuid4().hex}",
+            )
+        return CustomerServiceResponse.model_validate(result.model_dump())
+
+    def reset(self, session_id: str) -> bool:
+        with self._guard._session() as db:
+            return self._guard._customer_service.reset(
+                db,
+                session_id,
+                tenant_id=self._guard.tenant_id,
+            )
+
+
 class DocGuard:
     """In-process facade exposing the same resources as the HTTP client."""
 
@@ -417,10 +518,15 @@ class DocGuard:
             index_service=IndexService(vector_service=self._vector_service),
         )
         self._lifecycle = DocumentLifecycleService(self._ingestion)
+        self._reembed = ReembedService(
+            embedding_service=self._ingestion.index_service.embedding_service,
+            vector_service=self._vector_service,
+        )
         lexical = LexicalRetriever(session_factory=self._session_factory)
         dense = VectorRetriever(vector_service=self._vector_service)
         retriever = HybridRetriever(lexical=lexical, dense=dense)
         self._query = QueryService(RetrievalService(retriever=retriever))
+        self._customer_service = CustomerServiceService(self._query)
         self._review = ReviewService()
         self._documents = DocumentRepository()
         self._chunks = ChunkRepository()
@@ -432,6 +538,7 @@ class DocGuard:
         self.reviews = LocalReviews(self)
         self.issues = LocalIssues(self)
         self.jobs = LocalJobs(self)
+        self.customer_service = LocalCustomerService(self)
 
     @contextmanager
     def _session(self):
@@ -549,6 +656,46 @@ class DocGuard:
             )
             try:
                 result = self._ingestion.ingest_bytes(db, **arguments)
+                self._job_repository.update(
+                    db,
+                    job_id,
+                    status="COMPLETED",
+                    progress=100,
+                    current_stage="COMPLETED",
+                    result=result.model_dump(mode="json"),
+                )
+            except Exception as exc:
+                db.rollback()
+                self._job_repository.update(
+                    db,
+                    job_id,
+                    status="FAILED",
+                    progress=100,
+                    current_stage="FAILED",
+                    error=str(exc),
+                )
+
+    def _run_reembed_job(self, job_id: str, arguments: dict) -> None:
+        with self._session() as db:
+            self._job_repository.update(
+                db,
+                job_id,
+                status="PROCESSING",
+                progress=0,
+                current_stage="REEMBEDDING",
+            )
+
+            def report(done: int, total: int) -> None:
+                self._job_repository.update(
+                    db,
+                    job_id,
+                    status="PROCESSING",
+                    progress=int(done * 100 / total) if total else 100,
+                    current_stage="REEMBEDDING",
+                )
+
+            try:
+                result = self._reembed.reembed(db, progress=report, **arguments)
                 self._job_repository.update(
                     db,
                     job_id,

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,11 @@ class VectorRepository:
 
         record.vector = json.dumps(vector)
         record.metadata_json = json.dumps(metadata, ensure_ascii=False)
+        # Stamp on update as well: the column default only fires on INSERT, and the
+        # snapshot fingerprint probes COUNT(id)/MAX(id)/MAX(created_at). An in-place
+        # re-embed moves none of the three, so the cache would serve the stale vector
+        # forever.
+        record.created_at = datetime.now()
         db.flush()
 
         return record

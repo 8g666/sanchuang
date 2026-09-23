@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from docguard_rag.server.core.config import get_settings
 from docguard_rag.server.core.provider_errors import ProviderError
-from docguard_rag.server.retrievers.lexical_retriever import tokenize
+from docguard_rag.server.core.tokenizer import tokenize
 from docguard_rag.server.reviewers.typo_reviewer import TypoReviewer
 from docguard_rag.server.schemas.correction import CorrectionRequest
 from docguard_rag.server.schemas.query import QuerySource

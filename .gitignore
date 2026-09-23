@@ -18,6 +18,10 @@ venv/
 .coverage
 htmlcov/
 
+# Build artifacts
+build/
+dist/
+
 # IDE
 .vscode/
 .idea/

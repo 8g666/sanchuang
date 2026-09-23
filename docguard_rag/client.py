@@ -8,6 +8,7 @@ import httpx
 from docguard_rag.errors import DocGuardAPIError
 from docguard_rag.types import (
     CorrectionResult,
+    CustomerServiceResponse,
     DocumentDeleteResult,
     DocumentResult,
     DocumentStatus,
@@ -15,6 +16,7 @@ from docguard_rag.types import (
     IssuePage,
     JobStatus,
     QueryResult,
+    ReembedResult,
     ReviewResult,
 )
 
@@ -57,6 +59,28 @@ class DocumentsClient:
         data = self._client._request("GET", f"/documents/{document_id}")
         return DocumentStatus.model_validate(data)
 
+    def upload_many(
+        self,
+        file_paths: list[str | Path],
+        *,
+        collection_id: str | None = None,
+        enable_review: bool = False,
+        metadata: dict | None = None,
+        async_mode: bool = False,
+    ) -> list[DocumentResult]:
+        """Upload a mixed batch using the same validation as single-file upload."""
+
+        return [
+            self.upload(
+                path,
+                collection_id=collection_id,
+                enable_review=enable_review,
+                metadata=metadata,
+                async_mode=async_mode,
+            )
+            for path in file_paths
+        ]
+
     def update(
         self,
         document_id: str,
@@ -87,6 +111,24 @@ class DocumentsClient:
     def reindex(self, document_id: str) -> DocumentResult:
         data = self._client._request("POST", f"/documents/{document_id}/reindex")
         return DocumentResult.model_validate(data)
+
+    def reembed(
+        self,
+        *,
+        document_ids: list[str] | None = None,
+        batch_size: int | None = None,
+        async_mode: bool = False,
+    ) -> ReembedResult:
+        data = self._client._request(
+            "POST",
+            "/documents/reembed",
+            json={
+                "document_ids": document_ids or [],
+                "batch_size": batch_size,
+                "async": async_mode,
+            },
+        )
+        return ReembedResult.model_validate(data)
 
     def delete(self, document_id: str) -> DocumentDeleteResult:
         data = self._client._request("DELETE", f"/documents/{document_id}")
@@ -182,6 +224,48 @@ class JobsClient:
         return JobStatus.model_validate(data)
 
 
+class CustomerServiceClient:
+    def __init__(self, client: "DocGuardClient"):
+        self._client = client
+
+    def chat(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        document_ids: list[str] | None = None,
+        collection_id: str | None = None,
+        top_k: int = 5,
+        corrective: bool | None = None,
+        max_retries: int | None = None,
+        handoff_if_unresolved: bool = True,
+    ) -> CustomerServiceResponse:
+        data = self._client._request(
+            "POST",
+            "/support/chat",
+            json={
+                "message": message,
+                "session_id": session_id,
+                "document_ids": document_ids or [],
+                "collection_id": collection_id,
+                "top_k": top_k,
+                "corrective": corrective,
+                "max_retries": max_retries,
+                "handoff_if_unresolved": handoff_if_unresolved,
+            },
+        )
+        return CustomerServiceResponse.model_validate(data)
+
+    def reset(self, session_id: str) -> dict:
+        """Clear a conversation's history.
+
+        Returns `{"session_id", "status", "found"}`; `found` is False for a session that
+        never existed, since the endpoint stays 200 for fire-and-forget callers.
+        """
+
+        return self._client._request("DELETE", f"/support/sessions/{session_id}")
+
+
 class DocGuardClient:
     """Synchronous Python client for a running DocGuard REST service."""
 
@@ -208,6 +292,7 @@ class DocGuardClient:
         self.reviews = ReviewsClient(self)
         self.issues = IssuesClient(self)
         self.jobs = JobsClient(self)
+        self.customer_service = CustomerServiceClient(self)
 
     def query(
         self,

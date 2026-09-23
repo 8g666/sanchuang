@@ -16,6 +16,26 @@ class DocumentDeleteResult(BaseModel):
     status: str = "DELETED"
 
 
+class ReembedRequest(BaseModel):
+    document_ids: list[str] = Field(default_factory=list)
+    batch_size: int | None = None
+    async_mode: bool = Field(default=False, alias="async")
+    model_config = {"populate_by_name": True}
+
+
+class ReembedResult(BaseModel):
+    reembedded: int = 0
+    # Chunks with no previous vector row: embedded, but start_offset/end_offset are
+    # derived from a chunk's position inside its block and never persisted, so they are
+    # unrecoverable from SQL. `POST /documents/{id}/reindex` reproduces them exactly.
+    embedded_without_offsets: int = 0
+    document_ids_needing_reindex: list[str] = Field(default_factory=list)
+    batches: int = 0
+    dimension: int = 0
+    job_id: str | None = None
+    status: str = "COMPLETED"
+
+
 class DocumentStatus(BaseModel):
     document_id: str
     filename: str

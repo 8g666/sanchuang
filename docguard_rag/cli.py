@@ -12,6 +12,14 @@ def main() -> None:
         action="store_true",
         help="Apply database migrations and exit",
     )
+    parser.add_argument(
+        "--reembed",
+        action="store_true",
+        help=(
+            "Re-embed every committed chunk with the configured model and exit. "
+            "Operates on DOCGUARD_DATABASE_URL (default ./docguard.db)"
+        ),
+    )
     args = parser.parse_args()
 
     if args.migrate:
@@ -22,6 +30,24 @@ def main() -> None:
         config = Config(str(migration_dir / "alembic.ini"))
         config.set_main_option("script_location", str(migration_dir))
         command.upgrade(config, "head")
+        return
+
+    if args.reembed:
+        from docguard_rag.local import DocGuard
+
+        with DocGuard() as guard:
+            result = guard.documents.reembed()
+        print(
+            f"Re-embedded {result.reembedded} chunk(s) in {result.batches} batch(es) "
+            f"at dimension {result.dimension}."
+        )
+        if result.document_ids_needing_reindex:
+            print(
+                f"WARNING: {result.embedded_without_offsets} chunk(s) across "
+                f"{len(result.document_ids_needing_reindex)} document(s) had no stored "
+                "vector to copy citation offsets from. Reindex those documents to "
+                "restore start_offset/end_offset."
+            )
         return
 
     import uvicorn

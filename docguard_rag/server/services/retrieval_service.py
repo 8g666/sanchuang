@@ -3,7 +3,6 @@ from docguard_rag.server.retrievers.hybrid_retriever import HybridRetriever
 
 class RetrievalService:
     def __init__(self, retriever=None):
-
         self.retriever = retriever or HybridRetriever()
 
     def search(

@@ -23,11 +23,32 @@ class CompatibleLLM(LLMProvider):
         self.model_name = model_name
         self.endpoint = endpoint
         self.temperature = temperature
-        self.client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            headers=headers,
-            timeout=timeout,
-        )
+        self._base_url = base_url.rstrip("/")
+        self._headers = headers
+        self._timeout = timeout
+        self._client: httpx.Client | None = None
+
+    @property
+    def fingerprint(self) -> tuple:
+        """Identifies the model whose completions this provider produces."""
+
+        return ("compatible_api", self.model_name)
+
+    @property
+    def client(self) -> httpx.Client:
+        # Built on first use rather than in __init__: providers are constructed at import
+        # time and closed at shutdown, and httpx refuses to reuse a closed client.
+        if self._client is None:
+            self._client = httpx.Client(
+                base_url=self._base_url,
+                headers=self._headers,
+                timeout=self._timeout,
+            )
+        return self._client
+
+    @client.setter
+    def client(self, client: httpx.Client) -> None:
+        self._client = client
 
     def generate(
         self,
@@ -59,4 +80,6 @@ class CompatibleLLM(LLMProvider):
         }
 
     def close(self) -> None:
-        self.client.close()
+        if self._client is not None:
+            self._client.close()
+            self._client = None

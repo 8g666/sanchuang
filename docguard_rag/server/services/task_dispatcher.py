@@ -24,8 +24,12 @@ class InProcessTaskDispatcher:
     """Thread-backed dispatcher for local and single-node deployments."""
 
     def __init__(self, max_workers: int | None = None):
-        self.executor = ThreadPoolExecutor(
-            max_workers=max_workers or get_settings().task_workers,
+        self.max_workers = max_workers or get_settings().task_workers
+        self.executor = self._new_executor()
+
+    def _new_executor(self) -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
+            max_workers=self.max_workers,
             thread_name_prefix="docguard-task",
         )
 
@@ -33,7 +37,13 @@ class InProcessTaskDispatcher:
         return self.executor.submit(function, *args, **kwargs)
 
     def shutdown(self, wait: bool = True) -> None:
-        self.executor.shutdown(wait=wait, cancel_futures=False)
+        # Swap in a fresh executor rather than leaving this one dead: the REST dispatcher
+        # is an import-time singleton that endpoints bind by name, so it cannot be
+        # replaced, and a FastAPI lifespan exit must not break the next startup.
+        # ThreadPoolExecutor spawns threads lazily, so the replacement costs nothing
+        # until something is submitted to it.
+        executor, self.executor = self.executor, self._new_executor()
+        executor.shutdown(wait=wait, cancel_futures=False)
 
 
 class CeleryTaskDispatcher:

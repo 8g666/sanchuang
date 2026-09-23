@@ -20,7 +20,6 @@ class FileStorage:
         )
 
     def save(self, filename: str, file_path: str) -> str:
-
         safe_name = self.safe_filename(filename)
         target = self.upload_dir / f"{uuid4().hex}_{safe_name}"
 
@@ -42,7 +41,6 @@ class FileStorage:
         path.unlink(missing_ok=True)
 
     def calculate_hash(self, file_path: str) -> str:
-
         sha256 = hashlib.sha256()
 
         with open(file_path, "rb") as f:

@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
@@ -12,11 +14,30 @@ from sqlalchemy.exc import SQLAlchemyError
 from docguard_rag.server.api.v1.router import api_router
 from docguard_rag.server.core.config import get_settings
 from docguard_rag.server.core.provider_errors import ProviderError
+from docguard_rag.server.core.provider_factory import close_providers
 from docguard_rag.server.database.connection import SessionLocal
 from docguard_rag.server.database.init_db import init_database
+from docguard_rag.server.services.task_dispatcher import dispatcher
 
 API_PREFIX = "/v1"
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """Release the import-time singletons this process built.
+
+    Database initialisation stays eager in create_application: the module-level `app`
+    relies on the schema existing by import time.
+    """
+
+    yield
+    close_providers()
+    if get_settings().task_backend == "local":
+        # wait=False: an in-flight ingestion job must not hold shutdown open. The
+        # dispatcher swaps in a fresh executor, so a later startup in this same process
+        # (a second TestClient, an embedded server) can still dispatch.
+        dispatcher.shutdown(wait=False)
 
 
 def _request_id(request: Request) -> str:
@@ -54,6 +75,7 @@ def create_application(*, initialize_database: bool = True) -> FastAPI:
         debug=settings.debug,
         description="General-purpose document RAG and quality review service",
         redirect_slashes=False,
+        lifespan=_lifespan,
     )
     application.include_router(api_router, prefix=API_PREFIX)
 
