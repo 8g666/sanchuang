@@ -2,6 +2,8 @@ import json
 
 import httpx
 
+from docguard_rag.server.core import provider_factory
+from docguard_rag.server.core.config import get_settings
 from docguard_rag.server.embeddings.compatible_embedding import CompatibleEmbedding
 from docguard_rag.server.llms.compatible_llm import CompatibleLLM
 from docguard_rag.server.rerankers.compatible_reranker import CompatibleReranker
@@ -78,6 +80,107 @@ def test_compatible_llm_and_reranker_providers():
     assert ranked[0]["score"] == 0.98
     llm.close()
     reranker.close()
+
+
+# What QueryRewriter passes: the field names live only in the schema, never in the prompt.
+_REWRITE_SCHEMA = {
+    "name": "query_rewrite",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}, "reason": {"type": "string"}},
+        "required": ["query", "reason"],
+        "additionalProperties": False,
+    },
+}
+_MESSAGES = [
+    {"role": "system", "content": "Rewrite the query. Return JSON only."},
+    {"role": "user", "content": "Original query: 积分"},
+]
+
+
+def _capturing_llm(**kwargs):
+    """A CompatibleLLM whose every request payload is recorded."""
+
+    payloads = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    llm = CompatibleLLM(base_url="http://model.test", model_name="chat", **kwargs)
+    return _mocked(llm, handler), payloads
+
+
+def test_llm_moves_the_schema_into_the_prompt_for_json_object_providers():
+    """智谱 documents only text and json_object, so json_schema would be rejected and the
+    callers would silently fall back to their deterministic paths."""
+
+    llm, payloads = _capturing_llm()
+
+    llm.generate([dict(message) for message in _MESSAGES], response_schema=_REWRITE_SCHEMA)
+
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+    content = payloads[0]["messages"][-1]["content"]
+    # The inner schema carries the field names; the outer strict/name wrapper is OpenAI
+    # bookkeeping that means nothing to a model reading a prompt.
+    assert '"required":["query","reason"]' in content
+    assert "strict" not in content
+    llm.close()
+
+
+def test_llm_keeps_strict_json_schema_when_the_provider_supports_it():
+    llm, payloads = _capturing_llm(strict_schema=True)
+
+    llm.generate([dict(message) for message in _MESSAGES], response_schema=_REWRITE_SCHEMA)
+
+    assert payloads[0]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": _REWRITE_SCHEMA,
+    }
+    # The schema is on the wire, so the prompt is left alone.
+    assert payloads[0]["messages"] == _MESSAGES
+    llm.close()
+
+
+def test_llm_does_not_mutate_the_callers_messages():
+    """Corrective RAG retries reuse one query's messages, and a mutated list would stack a
+    second copy of the instruction on each attempt."""
+
+    llm, _ = _capturing_llm()
+    messages = [dict(message) for message in _MESSAGES]
+
+    llm.generate(messages, response_schema=_REWRITE_SCHEMA)
+    llm.generate(messages, response_schema=_REWRITE_SCHEMA)
+
+    assert messages == _MESSAGES
+    llm.close()
+
+
+def test_llm_omits_response_format_without_a_schema():
+    llm, payloads = _capturing_llm()
+
+    llm.generate([dict(message) for message in _MESSAGES])
+
+    assert "response_format" not in payloads[0]
+    assert payloads[0]["messages"] == _MESSAGES
+    llm.close()
+
+
+def test_the_llm_json_schema_setting_reaches_the_provider(monkeypatch):
+    monkeypatch.setenv("DOCGUARD_LLM_PROVIDER", "compatible_api")
+    monkeypatch.setenv("DOCGUARD_LLM_BASE_URL", "http://model.test")
+    monkeypatch.setenv("DOCGUARD_LLM_MODEL_NAME", "glm-4.6")
+    monkeypatch.setenv("DOCGUARD_LLM_JSON_SCHEMA", "true")
+    get_settings.cache_clear()
+
+    provider = provider_factory.create_llm_provider()
+    # Cleared before asserting, so a failure here cannot leak these settings to later tests.
+    get_settings.cache_clear()
+
+    assert provider.strict_schema is True
+    # Drain the registry: close_providers() counts everything tracked process-wide.
+    provider_factory.close_providers()
 
 
 def test_compatible_embedding_batches_and_preserves_input_order():

@@ -784,7 +784,8 @@ DOCGUARD_RERANKER_MODEL_NAME=rerank
 DOCGUARD_LLM_PROVIDER=compatible_api
 DOCGUARD_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 DOCGUARD_LLM_API_KEY=<your-key>
-DOCGUARD_LLM_MODEL_NAME=glm-4-air
+DOCGUARD_LLM_MODEL_NAME=glm-4.6
+DOCGUARD_LLM_JSON_SCHEMA=false
 ```
 
 需要注意：
@@ -793,6 +794,7 @@ DOCGUARD_LLM_MODEL_NAME=glm-4-air
 - **切换 embedding 模型或维度后必须重嵌入整个语料**，否则新旧向量宽度不一致，检索会拒绝旧向量。见「重嵌入语料」。
 - `embedding-3` 单次请求最多 64 条文本、单条最多 3072 token。客户端按 `DOCGUARD_EMBEDDING_BATCH_SIZE`（默认 64）自动分批，调用方无需关心；任一批失败会中止整次入库并回滚，已写入的文件也会被删除。
 - rerank 单次请求最多 128 篇、单篇最多 4096 字符。`HybridRetriever` 的融合候选在 `top_k=50` 时可达 400 篇，客户端会自动分批后按分数归并，结果与单次请求等价。
+- **智谱不接受 `response_format=json_schema`**，官方文档里 type 只有 `text` 和 `json_object`。`DOCGUARD_LLM_JSON_SCHEMA` 默认为 `false`，此时客户端改发 `json_object`，并把 JSON Schema 序列化后追加到最后一条消息里——字段名靠提示词约束，而不是靠服务端强制。只有确认端点支持严格 schema（OpenAI 等）才设成 `true`。设错的后果很隐蔽：查询改写、证据打分、答案校验、文档审查四处都会收到 400，而这四处都把 `ProviderError` 当作"模型不可用"**静默吞掉**、退回确定性算法，既不报错也不降级提示。验收方法见下面第 5 项。
 - 重嵌入或大批量入库会按批顺序发请求，**不做自动重试**。触发限流（429）时本次运行中止，已提交的批次保留，重新执行即可续做。
 
 ### 切到智谱后的验收清单
@@ -831,6 +833,16 @@ DOCGUARD_LLM_MODEL_NAME=glm-4-air
    ```
 
    如果它每次都涨，说明指纹探测判定语料一直在变（通常是并发写入或时钟问题），那才是延迟来源；矩阵检索本身没有逐行回退路径。内存占用见「向量检索的内存占用」。
+
+6. **结构化输出没有静默失效。** 专治 `DOCGUARD_LLM_JSON_SCHEMA` 那个坑：三个 corrective 环节失败时不抛错，但 `attempts[].reason` 里留着痕迹。发一次 `POST /v1/query` 带 `corrective=true`，看 `attempts[0].reason`：
+
+   | reason 里出现 | 含义 |
+   | --- | --- |
+   | `model relevance grading` | 证据打分真的走了模型，结构化输出正常 |
+   | `model grading unavailable; used deterministic grading` | **请求发出去了但被拒**——通常是端点不接受 `json_schema`，把 `DOCGUARD_LLM_JSON_SCHEMA` 设回 `false` |
+   | `lexical coverage and retrieval score` | 根本没有 LLM：`DOCGUARD_LLM_PROVIDER` 不是 `compatible_api`，或 `DOCGUARD_CORRECTIVE_USE_LLM=false` |
+
+   答案校验同理，`model verification unavailable` 说明它也退回了确定性算法。三种情况在 HTTP 层面都是 200，只有这个字段能区分。
 
 ### 查询向量缓存
 

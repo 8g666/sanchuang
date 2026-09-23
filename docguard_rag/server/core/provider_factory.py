@@ -102,5 +102,6 @@ def create_llm_provider():
             endpoint=settings.llm_endpoint,
             timeout=settings.llm_timeout,
             temperature=settings.llm_temperature,
+            strict_schema=settings.llm_json_schema,
         )
     )

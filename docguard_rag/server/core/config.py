@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     llm_endpoint: str = "/chat/completions"
     llm_timeout: float = 60.0
     llm_temperature: float = 0.0
+    llm_json_schema: bool = False
     llm_review_enabled: bool = False
     model_timeout: float = 30.0
     max_context_chars: int = 12000
